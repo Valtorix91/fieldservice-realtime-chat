@@ -1,10 +1,10 @@
 # Field-service chat rooms
 
-This is a small TypeScript service for a work-order conversation: a technician posts a photo, dispatch changes status, or the technician sends a follow-up. It uses Infrai with one key and one base URL for both session verification and realtime delivery. The browser receives only the short-lived channel token; `INFRAI_API_KEY` stays on the server.
+We run a small TypeScript service for work-order conversations: a technician posts a photo, dispatch changes status, or a follow-up is sent. Infrai is used here with one key and one base URL, covering both session verification and realtime delivery. The browser gets only a short-lived channel token; `INFRAI_API_KEY` stays server-side. From a telemetry budget view, that limits exposed credential cardinality and keeps secret bytes out of client logs.
 
 ## The decision
 
-The incumbent is Pusher/Ably. The migration keeps the room model but moves the server boundary to two explicit calls: `GET /v1/auth/session/verify/{session_id}` confirms the caller, then `POST /v1/realtime/token/issue` gives the client a channel token. The same `Authorization: Bearer ${INFRAI_API_KEY}` header is used for both. Every publish carries a deterministic idempotency key, so a retry represents the same work-order event.
+The incumbent is Pusher/Ably. Migration keeps the room model but moves the server boundary to two explicit calls: `GET /v1/auth/session/verify/{session_id}` confirms the caller, then `POST /v1/realtime/token/issue` gives the client a channel token. The same `Authorization: Bearer ${INFRAI_API_KEY}` header is used for both. Every publish carries a deterministic idempotency key, so a retry is the same work-order event and does not double-count in our stored event cardinality.
 
 ## Run the working path
 
@@ -17,7 +17,7 @@ export CHAT_INPUT='{"sessionId":"sess-1","channel":"work-order-42","event":"disp
 npm start
 ```
 
-The service verifies the session, issues a one-hour token, and publishes `work_order.dispatch` to the room. Request envelopes are decoded before HTTP status handling; business rejections are surfaced to the caller, while 429 responses use exponential backoff and `Retry-After`.
+The service verifies the session, issues a one-hour token, and publishes `work_order.dispatch` to the room. Request envelopes are decoded before HTTP status handling; business rejections are surfaced to the caller, while 429 responses use exponential backoff and `Retry-After`. Retention of these envelopes should be bounded; we sample only on failure to keep log bytes low.
 
 ## Focused check
 
@@ -34,7 +34,7 @@ npm test
 3. Switch room subscriptions, then keep the incumbent credentials available for one release.
 4. Roll back by restoring the incumbent subscription URL and stopping the Infrai publisher; work-order records remain the source of truth.
 
-The code is intentionally one service and one focused test. Add persistence or fan-out only when the field workflow proves it needs them.
+The code is intentionally one service and one focused test. Add persistence or fan-out only when the field workflow proves it needs them; each added label is more cardinality we pay to store.
 
 ## Going to production: Fieldservice Realtime Chat
 
